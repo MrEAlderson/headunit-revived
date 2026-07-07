@@ -48,6 +48,7 @@ import android.content.IntentFilter
 import com.andrerinas.headunitrevived.view.ProjectionViewScaler
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
+import android.view.Display
 import android.widget.ImageView
 import android.widget.VideoView
 import com.bumptech.glide.Glide
@@ -696,6 +697,20 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
                     loadingOverlay?.alpha = 1f
                 }?.start()
                 ?: run { loadingOverlay?.visibility = View.GONE }
+        }
+
+        if (!videoDecoder.didPew) {
+            videoDecoder.didPew = true
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val text = display.displayId.toString() + " " + Display.DEFAULT_DISPLAY + " " + display.flags;
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    recreate()
+                    Toast.makeText(this, "Pew!", Toast.LENGTH_LONG).show()
+                }, 1000)
+            }
         }
     }
 

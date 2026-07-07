@@ -47,7 +47,6 @@ import com.andrerinas.headunitrevived.connection.UsbDeviceCompat
 import com.andrerinas.headunitrevived.connection.UsbReceiver
 import com.andrerinas.headunitrevived.location.GpsLocationService
 import com.andrerinas.headunitrevived.utils.AppLog
-import com.andrerinas.headunitrevived.utils.HeadUnitScreenConfig
 import com.andrerinas.headunitrevived.utils.LocaleHelper
 import com.andrerinas.headunitrevived.utils.LogExporter
 import com.andrerinas.headunitrevived.utils.NightModeManager
@@ -68,9 +67,9 @@ import android.view.WindowManager
 import android.media.AudioManager
 import com.andrerinas.headunitrevived.utils.HotspotManager
 import com.andrerinas.headunitrevived.utils.VpnControl
-import com.andrerinas.headunitrevived.connection.CarKeyReceiver
 import com.andrerinas.headunitrevived.connection.NativeAaHandshakeManager
 import com.andrerinas.headunitrevived.connection.NearbyManager
+import com.andrerinas.headunitrevived.connection.carkey.CarKeysManager
 import com.andrerinas.headunitrevived.main.BackgroundNotification
 import com.andrerinas.headunitrevived.utils.Settings
 import com.andrerinas.headunitrevived.utils.protoUint32ToLong
@@ -104,7 +103,7 @@ class AapService : Service(), UsbReceiver.Listener {
     private var nativeAaHandshakeManager: NativeAaHandshakeManager? = null
     private var nearbyManager: NearbyManager? = null
     private var wifiAutoStartReceiver: WifiAutoStartReceiver? = null
-    private var carKeyReceiver: CarKeyReceiver? = null
+    private var carKeyManager: CarKeysManager? = null
     private var wirelessServer: WirelessServer? = null
     private var networkDiscovery: NetworkDiscovery? = null
     private var mediaSession: MediaSessionCompat? = null
@@ -150,7 +149,7 @@ class AapService : Service(), UsbReceiver.Listener {
                     }
                 }
             }
-            
+
             if (key == Settings.KEY_MEDIA_VOLUME_OFFSET || key == Settings.KEY_ASSISTANT_VOLUME_OFFSET || key == Settings.KEY_NAVIGATION_VOLUME_OFFSET) {
                 serviceScope.launch(Dispatchers.Main) {
                     commManager.updateAudioGains()
@@ -194,7 +193,6 @@ class AapService : Service(), UsbReceiver.Listener {
     private var accessoryHandshakeFailures = 0
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var wifiLock: WifiManager.WifiLock? = null
-    private var isCarKeyReceiverRegistered = false
 
     private var wifiReadyCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -675,7 +673,7 @@ class AapService : Service(), UsbReceiver.Listener {
         setupNightMode()
         observeConnectionState()
         registerReceivers()
-        
+
         // Handle immediate WiFi auto-start check (e.g. if already connected on boot/wake)
         WifiAutoStartReceiver.checkAndStart(this)
 
@@ -701,7 +699,7 @@ class AapService : Service(), UsbReceiver.Listener {
 
         nativeAaHandshakeManager = NativeAaHandshakeManager(this, serviceScope)
         wifiDirectManager = WifiDirectManager(this)
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             try {
                 nearbyManager = NearbyManager(this, serviceScope) { socket ->
@@ -715,7 +713,7 @@ class AapService : Service(), UsbReceiver.Listener {
                 AppLog.e("AapService: Failed to init NearbyManager: ${e.message}")
             }
         }
-        
+
         initWifiModeWithOptionalWait()
         wifiDirectManager?.setCredentialsListener { ssid, psk, ip, bssid ->
             val appSettings = App.provide(this).settings
@@ -736,7 +734,7 @@ class AapService : Service(), UsbReceiver.Listener {
         }
 
 
-        carKeyReceiver = CarKeyReceiver()
+        carKeyManager = CarKeysManager()
 
         checkAlreadyConnectedUsb()
         registerNetworkMonitor()
@@ -895,24 +893,7 @@ class AapService : Service(), UsbReceiver.Listener {
         // Silent audio hack removed to prevent mixing/resampling stuttering issues
 
         // Register the comprehensive steering wheel key receiver
-        if (!isCarKeyReceiverRegistered) {
-            val filter = IntentFilter().apply {
-                priority = 1000
-                CarKeyReceiver.ACTIONS.forEach { addAction(it) }
-            }
-            try {
-                ContextCompat.registerReceiver(
-                    this,
-                    carKeyReceiver,
-                    filter,
-                    ContextCompat.RECEIVER_EXPORTED
-                )
-                isCarKeyReceiverRegistered = true
-                AppLog.d("AapService: CarKeyReceiver registered")
-            } catch (e: Exception) {
-                AppLog.e("AapService: Failed to register CarKeyReceiver", e)
-            }
-        }
+        carKeyManager!!.registerReceivers(this)
 
         // Reactivate the existing MediaSession (created in onCreate, kept alive across disconnects)
         safeMediaSessionCall { it.isActive = true }
@@ -1003,7 +984,7 @@ class AapService : Service(), UsbReceiver.Listener {
                             commManager.sendKey(keyEvent.keyCode, false)
                             return true
                         }
-                        
+
                         // Consume ACTION_UP to prevent fallback
                         if (keyEvent.action == android.view.KeyEvent.ACTION_UP) {
                             return true
@@ -1061,15 +1042,7 @@ class AapService : Service(), UsbReceiver.Listener {
 
         // Release any permanent audio focus we may have requested when connected
         releasePermanentAudioFocus()
-        if (isCarKeyReceiverRegistered) {
-            try {
-                carKeyReceiver?.let { unregisterReceiver(it) }
-            } catch (e: Exception) {
-                AppLog.e("AapService: Failed to unregister CarKeyReceiver", e)
-            } finally {
-                isCarKeyReceiverRegistered = false
-            }
-        }
+        carKeyManager!!.unregisterReceivers()
 
         if (!isDestroying) updateNotification()
         mediaMetadataDecodeJob?.cancel()
@@ -1088,7 +1061,7 @@ class AapService : Service(), UsbReceiver.Listener {
         updateMediaSessionState(false)
         serviceScope.launch(Dispatchers.IO) {
             nearbyManager?.stop() // Disconnect Nearby tunnel
-            
+
             val settings = App.provide(this@AapService).settings
             if (settings.wifiConnectionMode == 3) {
                 if (state.isUserExit) {
@@ -1232,7 +1205,7 @@ class AapService : Service(), UsbReceiver.Listener {
             ContextCompat.RECEIVER_EXPORTED
         )
         AppLog.i("Registered runtime MEDIA_BUTTON receiver")
-        
+
         // WiFi Auto-start: Dynamic registration for reliability on Android 8+
         wifiAutoStartReceiver = WifiAutoStartReceiver()
         ContextCompat.registerReceiver(
@@ -1443,7 +1416,7 @@ class AapService : Service(), UsbReceiver.Listener {
                     }
                     3, 4 -> { /* Host/Passive - just wait for connection on WirelessServer port */ }
                 }
-                
+
                 // Hotspot logic for Helper mode if enabled
                 if (settings.autoEnableHotspot) {
                     Thread {
@@ -1458,12 +1431,12 @@ class AapService : Service(), UsbReceiver.Listener {
                 // Start WiFi Direct as a "quiet host" (P2P Group for phone to join)
                 // We let WifiDirectManager handle the WiFi state (enabling if needed)
                 wifiDirectManager?.startNativeAaQuietHost()
-                
+
                 // Start the official Bluetooth handshake servers
                 nativeAaHandshakeManager?.start()
             }
         }
-        
+
         activeWifiMode = mode
         activeHelperStrategy = strategy
     }
@@ -1580,10 +1553,7 @@ class AapService : Service(), UsbReceiver.Listener {
         try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(mediaButtonReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(wakeDetectReceiver) } catch (_: Exception) {}
-        if (isCarKeyReceiverRegistered) {
-            try { carKeyReceiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
-            isCarKeyReceiverRegistered = false
-        }
+        carKeyManager?.unregisterReceivers()
         try { wifiAutoStartReceiver?.let { unregisterReceiver(it) } } catch (_: Exception) {}
         uiModeManager.disableCarMode(0)
         serviceScope.cancel()
@@ -1651,7 +1621,7 @@ class AapService : Service(), UsbReceiver.Listener {
                 val settings = App.provide(this).settings
                 val mode = settings.wifiConnectionMode
                 val strategy = settings.helperConnectionStrategy
-                
+
                 // [FIX] Reset exit flags on manual scan start
                 userExitedAA = false
                 userExitCooldownUntil = 0L
@@ -1680,7 +1650,7 @@ class AapService : Service(), UsbReceiver.Listener {
                     // [FIX] Reset exit flags so the subsequent connection is accepted
                     userExitedAA = false
                     userExitCooldownUntil = 0L
-                    
+
                     val settings = App.provide(this).settings
                     if (activeWifiMode != 3 || settings.wifiConnectionMode != 3) {
                         AppLog.i("AapService: Initializing Native AA mode before poke...")
@@ -1688,10 +1658,10 @@ class AapService : Service(), UsbReceiver.Listener {
                     } else {
                         AppLog.d("AapService: Already in Native AA mode, skipping re-init.")
                         // Just ensure servers are running if they were stopped for some reason
-                        startWirelessServer() 
+                        startWirelessServer()
                         nativeAaHandshakeManager?.start()
                     }
-                    
+
                     nativeAaHandshakeManager?.manualPoke(mac)
                 }
             }
@@ -1772,7 +1742,7 @@ class AapService : Service(), UsbReceiver.Listener {
         if (commManager.isConnected) {
             commManager.disconnect(sendByeBye = false, isUserExit = false)
         }
-        
+
         // Wait a bit and check if the device is still there in normal mode
         serviceScope.launch {
             delay(1500) // Give the phone/system time to settle its USB state

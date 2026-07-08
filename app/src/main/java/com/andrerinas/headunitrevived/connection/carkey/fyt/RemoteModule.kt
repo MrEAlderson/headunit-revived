@@ -17,10 +17,10 @@ interface RemoteModule : IInterface {
     }
 
     @Throws(RemoteException::class)
-    fun cmd(cmdCode: Int, ints: IntArray, floats: FloatArray, strings: Array<String>)
+    fun cmd(cmdCode: Int, ints: IntArray? = null, floats: FloatArray? = null, strings: Array<String>? = null)
 
     @Throws(RemoteException::class)
-    fun get(getCode: Int, ints: IntArray, floats: FloatArray, strings: Array<String>): ModuleObject?
+    fun get(getCode: Int, ints: IntArray? = null, floats: FloatArray? = null, strings: Array<String>? = null): ModuleObject?
 
     @Throws(RemoteException::class)
     fun register(callback: ModuleCallback, updateCode: Int, update: Int)
@@ -57,20 +57,20 @@ interface RemoteModule : IInterface {
                 TRANSACTION_CMD -> {
                     data.enforceInterface(DESCRIPTOR)
                     val cmdCode = data.readInt()
-                    val ints: IntArray = data.createIntArray()!!
-                    val flts: FloatArray = data.createFloatArray()!!
-                    val strs: Array<String> = data.createStringArray()!!
-                    cmd(cmdCode, ints, flts, strs)
+                    val ints: IntArray? = data.createIntArray()
+                    val floats: FloatArray? = data.createFloatArray()
+                    val strings: Array<String>? = data.createStringArray()
+                    cmd(cmdCode, ints, floats, strings)
                     return true
                 }
 
                 TRANSACTION_GET -> {
                     data.enforceInterface(DESCRIPTOR)
                     val getCode = data.readInt()
-                    val ints2 = data.createIntArray()
-                    val flts2 = data.createFloatArray()
-                    val strs2 = data.createStringArray()
-                    val result: ModuleObject? = get(getCode, ints2!!, flts2!!, strs2!!)
+                    val ints = data.createIntArray()
+                    val floats = data.createFloatArray()
+                    val strings = data.createStringArray()
+                    val result: ModuleObject? = get(getCode, ints, floats, strings)
                     reply!!.writeNoException()
 
                     if (result != null) {
@@ -120,7 +120,7 @@ interface RemoteModule : IInterface {
         }
 
         @Throws(RemoteException::class)  // android.os.Binder
-        override fun cmd(cmdCode: Int, ints: IntArray, floats: FloatArray, strings: Array<String>) {
+        override fun cmd(cmdCode: Int, ints: IntArray?, floats: FloatArray?, strings: Array<String>?) {
             val data = Parcel.obtain()
             val reply = Parcel.obtain()
 
@@ -141,9 +141,9 @@ interface RemoteModule : IInterface {
         @Throws(RemoteException::class)  // android.os.Binder
         override fun get(
             getCode: Int,
-            ints: IntArray,
-            floats: FloatArray,
-            strings: Array<String>,
+            ints: IntArray?,
+            floats: FloatArray?,
+            strings: Array<String>?,
         ): ModuleObject {
             val result: ModuleObject?
             val data = Parcel.obtain()

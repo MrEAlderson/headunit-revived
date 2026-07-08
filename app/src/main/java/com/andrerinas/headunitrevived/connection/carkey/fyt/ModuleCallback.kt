@@ -15,7 +15,7 @@ interface ModuleCallback : IInterface {
     }
 
     @Throws(RemoteException::class)
-    fun update(updateCode: Int, ints: IntArray, floats: FloatArray, strings: Array<String>)
+    fun update(updateCode: Int, ints: IntArray?, floats: FloatArray?, strings: Array<String>?)
 
 
     abstract class Stub : Binder(), ModuleCallback {
@@ -46,10 +46,10 @@ interface ModuleCallback : IInterface {
                 TRANSACTION_UPDATE -> {
                     data.enforceInterface(DESCRIPTOR)
                     val updateCode = data.readInt()
-                    val ints: IntArray = data.createIntArray()!!
-                    val flts: FloatArray = data.createFloatArray()!!
-                    val strs: Array<String> = data.createStringArray()!!
-                    update(updateCode, ints, flts, strs)
+                    val ints: IntArray? = data.createIntArray()
+                    val floats: FloatArray? = data.createFloatArray()
+                    val strings: Array<String>? = data.createStringArray()
+                    update(updateCode, ints, floats, strings)
                     return true
                 }
 
@@ -71,9 +71,9 @@ interface ModuleCallback : IInterface {
 
         override fun update(
             updateCode: Int,
-            ints: IntArray,
-            floats: FloatArray,
-            strings: Array<String>,
+            ints: IntArray?,
+            floats: FloatArray?,
+            strings: Array<String>?,
         ) {
             val data = Parcel.obtain()
 

@@ -48,6 +48,10 @@ import android.content.IntentFilter
 import com.andrerinas.headunitrevived.view.ProjectionViewScaler
 import android.animation.ObjectAnimator
 import android.animation.PropertyValuesHolder
+import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.Display
 import android.widget.ImageView
 import android.widget.VideoView
@@ -671,6 +675,28 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
         }
     }
 
+    private fun applyVirtualDisplayFix() {
+        // fixes projected picture being frozen within DUDU PiP
+        // does not fix the root cause, where there is a redraw (or something?) of the whole launcher
+        //  right before the first frame is shown
+        // there is also no public API to get the type of the display
+        // if this also causes issues with other virtual displays, try to obtain #getType() via reflection
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+            return
+        if (intent.getBooleanExtra("applied_vd_fix", false))
+            return
+        if (display == null || !display.name.startsWith("DUDU-launcher-split"))
+            return
+
+        intent.putExtra("applied_vd_fix", true) // avoid infinite-loop
+
+        AppLog.i("Detected VirtualDisplay: Recreating projection to fix stuck picture shortly")
+
+        Handler(Looper.getMainLooper()).postDelayed({
+            recreate()
+        }, 1000)
+    }
+
     private fun hideLoadingOverlay(loadingOverlay: View?) {
         overlayState = OverlayState.HIDDEN
 
@@ -699,19 +725,7 @@ class AapProjectionActivity : SurfaceActivity(), IProjectionView.Callbacks, Vide
                 ?: run { loadingOverlay?.visibility = View.GONE }
         }
 
-        if (!videoDecoder.didPew) {
-            videoDecoder.didPew = true
-
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val text = display.displayId.toString() + " " + Display.DEFAULT_DISPLAY + " " + display.flags;
-                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
-
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    recreate()
-                    Toast.makeText(this, "Pew!", Toast.LENGTH_LONG).show()
-                }, 1000)
-            }
-        }
+        applyVirtualDisplayFix()
     }
 
     private fun fallbackToDefaultOverlay() {

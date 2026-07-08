@@ -81,7 +81,6 @@ class VideoDecoder(private val settings: Settings) {
         }
     }
 
-    var didPew: Boolean = false
     private var codec: MediaCodec? = null
     private var codecBufferInfo: MediaCodec.BufferInfo? = null
     private var mSurface: Surface? = null
